@@ -1,0 +1,366 @@
+﻿{% extends "base.html" %}
+{% set active = 'rankings' %}
+
+{% block content %}
+<a href="/rankings" class="text-secondary small">&larr; Back to suspicious-items ranking</a>
+<h1 class="h3 mt-2 mb-3">Item: {{ code }}</h1>
+
+<div class="guide-card">
+  <h2>How to read this item page - in 5 steps</h2>
+  <div class="guide-step">
+    <span class="step-badge s1">1</span>
+    <div class="guide-text">
+      <b>Glance at the four tiles below</b> - total rows, how many are
+      inconsistent, how many were revised, and the overall suspicion
+      score for this single item.
+    </div>
+  </div>
+  <div class="guide-step">
+    <span class="step-badge s2">2</span>
+    <div class="guide-text">
+      <b>Read the metric pills</b> next: anomaly hit-rates from each of
+      the three detectors, plus the typical revision size.
+    </div>
+  </div>
+  <div class="guide-step">
+    <span class="step-badge s3">3</span>
+    <div class="guide-text">
+      <b>Open the left-hand chart</b> - actual sales vs forecast, with
+      red triangles wherever a detector flagged a row. Hover for which
+      model(s) flagged that date.
+    </div>
+  </div>
+  <div class="guide-step">
+    <span class="step-badge s4">4</span>
+    <div class="guide-text">
+      <b>Then the right-hand chart</b> - daily change in Gross Sales
+      between snapshots. Tall bars (positive blue or negative red) are
+      the days when actuals were corrected the most.
+    </div>
+  </div>
+  <div class="guide-step">
+    <span class="step-badge s5">5</span>
+    <div class="guide-text">
+      <b>Finally the snapshot overlay below.</b> Each curve is one
+      forecast snapshot. When curves disagree at the same forecast
+      month, the system materially revised the forecast for that month.
+    </div>
+  </div>
+</div>
+
+<h4 class="mt-4 mb-2"><span class="step-badge s1">1</span>Item-level health check</h4>
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3"><div class="kpi-card">
+    <div class="kpi-label">Rows</div>
+    <div class="kpi-value">{{ rk.rows }}</div>
+    <div class="small text-secondary">data points for this item</div>
+  </div></div>
+  <div class="col-6 col-md-3"><div class="kpi-card kpi-warn">
+    <div class="kpi-label">Inconsistent</div>
+    <div class="kpi-value">{{ rk.n_inconsistent }}</div>
+    <div class="small text-secondary">rows whose actual sales changed between snapshots</div>
+  </div></div>
+  <div class="col-6 col-md-3"><div class="kpi-card kpi-warn">
+    <div class="kpi-label">Revised</div>
+    <div class="kpi-value">{{ rk.n_revised }}</div>
+    <div class="small text-secondary">rows whose forecast changed between snapshots</div>
+  </div></div>
+  <div class="col-6 col-md-3"><div class="kpi-card kpi-danger">
+    <div class="kpi-label">Suspicion score</div>
+    <div class="kpi-value">{{ (rk.suspicion_score*100) | round(1) }}%</div>
+    <div class="small text-secondary">composite of all three detectors</div>
+  </div></div>
+</div>
+
+<h4 class="mt-4 mb-2"><span class="step-badge s2">2</span>Detector hit-rates &amp; revision profile</h4>
+<div class="row g-3 mb-3">
+  <div class="col-md-4">
+    <div class="kpi-label">Anomaly hit-rates</div>
+    <span class="metric-pill bad">% Iso-Forest: {{ (rk.pct_anomaly_if*100) | round(1) }}%</span>
+    <span class="metric-pill bad">% CI: {{ (rk.pct_anomaly_ci*100) | round(1) }}%</span>
+    <span class="metric-pill bad">% Logistic-Reg: {{ (rk.pct_anomaly_lr*100) | round(1) }}%</span>
+    <div class="small text-secondary mt-1">share of this item's rows flagged by each method</div>
+  </div>
+  <div class="col-md-4">
+    <div class="kpi-label">Forecast revisions</div>
+    <span class="metric-pill">Avg |Rev|: {{ rk.avg_abs_revision | round(0) }}</span>
+    <span class="metric-pill">Avg ratio: {{ (rk.avg_revision_ratio*100) | round(2) }}%</span>
+    <div class="small text-secondary mt-1">typical size of forecast adjustments for this item</div>
+  </div>
+  <div class="col-md-4">
+    <div class="kpi-label">Largest single change</div>
+    <span class="metric-pill warn">{{ rk.max_diff_gross | round(0) }}</span>
+    <div class="small text-secondary mt-1">biggest absolute Gross-Sales change ever observed</div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-7"><div class="section-card">
+    <h2><span class="step-badge s3">3</span>Actual sales vs forecast</h2>
+    <div class="simple-words">
+      <span class="label">In plain words</span>
+      <b>Orange line</b> = real sales. <b>Blue dotted line</b> = forecast.
+      <b>Red triangles</b> = days where at least one detector flagged the
+      row. Hover any triangle to see which detector(s) raised the alarm.
+    </div>
+    <div id="plot-fc" class="plot-box lg"></div>
+  </div></div>
+  <div class="col-12 col-xl-5"><div class="section-card">
+    <h2><span class="step-badge s4">4</span>Day-by-day Gross-Sales changes</h2>
+    <div class="simple-words">
+      <span class="label">In plain words</span>
+      Each bar is the change in Gross Sales between two snapshots for one
+      day. <b>Blue</b> = sales were corrected up. <b>Red</b> = sales were
+      corrected down. Tall bars are the candidates for the detectors to
+      flag.
+    </div>
+    <div id="plot-diff" class="plot-box lg"></div>
+  </div></div>
+</div>
+
+<div class="section-card">
+  <h2><span class="step-badge s5">5</span>Confidence-Interval anomaly view for this item</h2>
+  <div class="simple-words">
+    <span class="label">In plain words</span>
+    The chart shows the <b>change in Gross Sales</b> (DifferenceGrossSales) for
+    each date of this item. The two dashed lines are the global CI band computed
+    across all items at a <b id="ci-level-label">—</b>% confidence level.
+    Any point that falls <b>outside</b> the band is coloured red and counts as a
+    CI anomaly. Points inside the band are shown in blue.
+  </div>
+  <div class="simple-words" style="border-color:var(--accent); background:#fff7ed;">
+    <span class="label" style="color:var(--accent)">How to read the chart</span>
+    <ul class="mb-0">
+      <li><b>Blue dots</b> — normal changes, inside the confidence band.</li>
+      <li><b>Red dots</b> — anomalies flagged by the CI detector: the Gross Sales
+        change was unusually large or unusually negative compared with the rest of
+        the dataset.</li>
+      <li><b>Dashed orange line (upper)</b> and <b>dashed green line (lower)</b> —
+        the CI boundaries. Any point above the orange or below the green line is
+        flagged.</li>
+      <li><b>Grey dotted line at zero</b> — reference: no change between snapshots.</li>
+    </ul>
+  </div>
+  <div class="row g-2 mb-2" id="ci-pills"></div>
+  <div id="plot-ci-item" class="plot-box"></div>
+</div>
+
+<div class="section-card">
+  <h2><span class="step-badge s5">5</span>All snapshot forecasts (overlay)</h2>
+  <div class="simple-words">
+    <span class="label">In plain words</span>
+    Each coloured line is one snapshot's forecast over the next-12-months
+    horizon. The vertical distance between two lines at the same forecast
+    month tells you how much later snapshots changed their mind for that
+    month.
+  </div>
+  <div id="alert-snap"></div>
+  <div id="plot-snap" class="plot-box"></div>
+</div>
+
+<div class="section-card">
+  <h2><span class="step-badge s5">5</span>Actual Gross Sales quantity - snapshot overlay</h2>
+  <div class="simple-words">
+    <span class="label">In plain words</span>
+    Each coloured line shows the <b>GrossSalesQuantitySwitched</b> as
+    recorded in one snapshot. When lines diverge at the same date, the
+    reported actual was later revised — a sign of data inconsistency.
+  </div>
+  <div id="alert-snap-gross"></div>
+  <div id="plot-snap-gross" class="plot-box"></div>
+</div>
+
+<div class="section-card">
+  <h2><span class="step-badge s5">5</span>Actual Sales-Out quantity - snapshot overlay</h2>
+  <div class="simple-words">
+    <span class="label">In plain words</span>
+    Each coloured line shows the <b>SalesOutQuantitySwitched</b> as
+    recorded in one snapshot. Diverging lines at the same date indicate
+    that the sell-out figure was corrected between snapshot runs.
+  </div>
+  <div id="alert-snap-so"></div>
+  <div id="plot-snap-so" class="plot-box"></div>
+</div>
+
+<div class="section-card" style="border-left: 4px solid var(--danger);">
+  <h2><span class="step-badge s5">5</span>Demand-planner checklist for {{ code }}</h2>
+  <div class="simple-words">
+    <span class="label">Validate the forecast only if</span>
+    <ul class="mb-0 mt-1">
+      <li>The actual line stays inside the forecast band most of the time.</li>
+      <li>Two consecutive snapshots agree (curves on top of each other).</li>
+      <li>Detectors don't all flag the same dates simultaneously.</li>
+    </ul>
+    <div class="mt-2"><b>Otherwise:</b> push the forecast back to planning
+      with a note pointing to the dates where the evidence diverges.</div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function load() {
+  const d = await CRP.fetchJSON('/api/item/{{ code }}');
+  if (d.error) {
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="alert alert-warning m-3">No data.</div>');
+    return;
+  }
+  const flagged = [];
+  for (let i = 0; i < d.actual_x.length; i++) {
+    if (d.ci_flag[i] || d.if_flag[i] || d.lr_flag[i]) {
+      flagged.push({x: d.actual_x[i], y: d.actual_y[i],
+                    why: [d.ci_flag[i]?'CI':null, d.if_flag[i]?'IF':null, d.lr_flag[i]?'LR':null]
+                          .filter(Boolean).join(', ')});
+    }
+  }
+  CRP.plot('plot-fc', [
+    {x: d.fc_x, y: d.fc_upper, mode: 'lines', line: {width: 0},
+     showlegend: false, hoverinfo: 'skip'},
+    {x: d.fc_x, y: d.fc_lower, mode: 'lines', fill: 'tonexty',
+     fillcolor: 'rgba(44,82,130,0.12)', line: {width: 0}, name: 'Normal band'},
+    {x: d.fc_x, y: d.fc_y, mode: 'lines+markers', name: 'Forecast',
+     line: {color: '#2c5282', width: 2.5, dash: 'dot'}},
+    {x: d.actual_x, y: d.actual_y, mode: 'lines+markers', name: 'Actual',
+     line: {color: '#c2410c', width: 2.5}},
+    {x: flagged.map(f => f.x), y: flagged.map(f => f.y),
+     text: flagged.map(f => 'flagged: ' + f.why),
+     mode: 'markers', name: 'Anomaly flag',
+     marker: {color: '#b91c1c', size: 12, symbol: 'triangle-up'},
+     hovertemplate: '%{x}<br>%{y:,.0f}<br>%{text}<extra></extra>'},
+  ], {xaxis: {title: 'Date'}, yaxis: {title: 'Quantity'}});
+
+  CRP.plot('plot-diff', [
+    {x: d.actual_x, y: d.diff_y, type: 'bar', name: 'Diff Gross Sales',
+     marker: {color: d.diff_y.map(v => v >= 0 ? '#2c5282' : '#b91c1c')}}
+  ], {xaxis: {title: 'Date'}, yaxis: {title: 'Diff Gross Sales'}});
+
+  const palette = ['#2c5282', '#d97706', '#047857', '#7c3aed', '#b91c1c',
+                   '#0891b2', '#a16207', '#db2777'];
+
+  // ── Snapshot outlier detection ──────────────────────────────────────────
+  const OUTLIER_THRESHOLD = 100000;
+
+  function checkSnapshotOutliers(snapshots, alertDivId) {
+    // Build a map: date → [{snapshot, value}]
+    const byDate = {};
+    snapshots.forEach(s => {
+      s.x.forEach((date, i) => {
+        if (!byDate[date]) byDate[date] = [];
+        byDate[date].push({snapshot: s.snapshot, value: s.y[i]});
+      });
+    });
+    const issues = [];
+    Object.entries(byDate).forEach(([date, entries]) => {
+      if (entries.length < 2) return;
+      const vals = entries.map(e => e.value);
+      const maxVal = Math.max(...vals);
+      const minVal = Math.min(...vals);
+      if (maxVal - minVal > OUTLIER_THRESHOLD) {
+        const outlier = entries.find(e => e.value === maxVal) || entries[0];
+        issues.push({date, diff: maxVal - minVal, snapshot: outlier.snapshot, value: maxVal});
+      }
+    });
+    const div = document.getElementById(alertDivId);
+    if (!div) return;
+    if (issues.length === 0) { div.innerHTML = ''; return; }
+    // Deduplicate by snapshot for the summary line
+    const badSnaps = [...new Set(issues.map(i => i.snapshot))];
+    const rows = issues.slice(0, 5).map(i =>
+      `<li><b>${i.date}</b> — snapshot <code>${i.snapshot}</code>: value <b>${i.value.toLocaleString()}</b>, gap <b>${i.diff.toLocaleString()}</b></li>`
+    ).join('');
+    const more = issues.length > 5 ? `<li class="text-secondary">… and ${issues.length - 5} more date(s)</li>` : '';
+    div.innerHTML = `
+      <div class="alert alert-danger d-flex align-items-start gap-2 py-2 px-3 mb-2" style="font-size:0.85rem;border-left:4px solid #b91c1c;background:#fff1f2;">
+        <span style="font-size:1.1rem;">&#9888;</span>
+        <div>
+          <b>Outlier snapshot detected</b> — snapshot(s) <code>${badSnaps.join(', ')}</code> deviate by more than 100&nbsp;000 from the others on ${issues.length} date(s):
+          <ul class="mb-0 mt-1">${rows}${more}</ul>
+        </div>
+      </div>`;
+  }
+
+  const traces = d.snapshots.map((s, i) => ({
+    x: s.x, y: s.y, mode: 'lines+markers',
+    name: s.snapshot, line: {color: palette[i % palette.length], width: 2}
+  }));
+  CRP.plot('plot-snap', traces,
+           {xaxis: {title: 'Forecast Month'}, yaxis: {title: 'Forecast quantity'}});
+  checkSnapshotOutliers(d.snapshots, 'alert-snap');
+
+  const tracesGross = d.snapshots_gross.map((s, i) => ({
+    x: s.x, y: s.y, mode: 'lines+markers',
+    name: s.snapshot, line: {color: palette[i % palette.length], width: 2}
+  }));
+  CRP.plot('plot-snap-gross', tracesGross,
+           {xaxis: {title: 'Date'}, yaxis: {title: 'Gross Sales Qty (switched)'}});
+  checkSnapshotOutliers(d.snapshots_gross, 'alert-snap-gross');
+
+  const tracesSO = d.snapshots_so.map((s, i) => ({
+    x: s.x, y: s.y, mode: 'lines+markers',
+    name: s.snapshot, line: {color: palette[i % palette.length], width: 2}
+  }));
+  CRP.plot('plot-snap-so', tracesSO,
+           {xaxis: {title: 'Date'}, yaxis: {title: 'Sales-Out Qty (switched)'}});
+  checkSnapshotOutliers(d.snapshots_so, 'alert-snap-so');
+
+  // ── CI section ──────────────────────────────────────────────────────────
+  const ciLower = d.ci_lower;
+  const ciUpper = d.ci_upper;
+  const ciMean  = d.ci_mean;
+  const ciLevel = d.ci_level;
+
+  // label
+  const lvlLabel = document.getElementById('ci-level-label');
+  if (lvlLabel) lvlLabel.textContent = (ciLevel * 100).toFixed(0);
+
+  // pills
+  const pillsDiv = document.getElementById('ci-pills');
+  if (pillsDiv) {
+    pillsDiv.innerHTML = [
+      `<div class="col-auto"><span class="metric-pill">CI level: ${(ciLevel*100).toFixed(0)}%</span></div>`,
+      `<div class="col-auto"><span class="metric-pill good">Lower bound: ${ciLower.toFixed(1)}</span></div>`,
+      `<div class="col-auto"><span class="metric-pill good">Upper bound: ${ciUpper.toFixed(1)}</span></div>`,
+      `<div class="col-auto"><span class="metric-pill">Mean diff: ${ciMean.toFixed(1)}</span></div>`,
+      `<div class="col-auto"><span class="metric-pill bad">CI anomalies: ${d.ci_flag.reduce((a,b)=>a+b,0)}</span></div>`,
+    ].join('');
+  }
+
+  // scatter: normal vs anomaly
+  const ciNormX = [], ciNormY = [], ciAnoX = [], ciAnoY = [];
+  for (let i = 0; i < d.actual_x.length; i++) {
+    if (d.ci_flag[i]) { ciAnoX.push(d.actual_x[i]); ciAnoY.push(d.diff_y[i]); }
+    else              { ciNormX.push(d.actual_x[i]); ciNormY.push(d.diff_y[i]); }
+  }
+  const xAll = d.actual_x;
+  CRP.plot('plot-ci-item', [
+    // shaded CI band
+    {x: xAll, y: Array(xAll.length).fill(ciUpper), mode: 'lines',
+     line: {color: 'rgba(234,88,12,0.7)', width: 1.5, dash: 'dash'},
+     name: 'Upper bound', hovertemplate: 'Upper: ' + ciUpper.toFixed(1) + '<extra></extra>'},
+    {x: xAll, y: Array(xAll.length).fill(ciLower), mode: 'lines',
+     fill: 'tonexty', fillcolor: 'rgba(37,99,235,0.07)',
+     line: {color: 'rgba(22,163,74,0.7)', width: 1.5, dash: 'dash'},
+     name: 'Lower bound', hovertemplate: 'Lower: ' + ciLower.toFixed(1) + '<extra></extra>'},
+    // zero reference
+    {x: xAll, y: Array(xAll.length).fill(0), mode: 'lines',
+     line: {color: '#94a3b8', width: 1, dash: 'dot'},
+     name: 'Zero', hoverinfo: 'skip', showlegend: false},
+    // normal points
+    {x: ciNormX, y: ciNormY, mode: 'markers', name: 'Normal',
+     marker: {color: '#2563eb', size: 7, opacity: 0.75},
+     hovertemplate: '%{x}<br>Δ Gross Sales: %{y:,.0f}<extra>Normal</extra>'},
+    // anomaly points
+    {x: ciAnoX, y: ciAnoY, mode: 'markers', name: 'CI Anomaly',
+     marker: {color: '#b91c1c', size: 10, symbol: 'circle', opacity: 0.9},
+     hovertemplate: '%{x}<br>Δ Gross Sales: %{y:,.0f}<extra>CI Anomaly</extra>'},
+  ], {
+    xaxis: {title: 'Date'},
+    yaxis: {title: 'Δ Gross Sales (between snapshots)'},
+    legend: {orientation: 'h', y: -0.22}
+  });
+}
+load();
+</script>
+{% endblock %}
