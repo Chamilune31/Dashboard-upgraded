@@ -1,0 +1,346 @@
+﻿{% extends "base.html" %}
+{% set active = 'anomalies' %}
+
+{% block content %}
+<h1 class="h3 mb-3">Anomaly Detection - three models, three opinions</h1>
+<p class="text-secondary mb-3">
+  An <b>anomaly</b> is a row whose forecast or actual sales looks unusually
+  different from the rest. Three different methods are run side-by-side so
+  we can cross-check their opinions before validating a forecast.
+</p>
+
+<div class="guide-card">
+  <h2>How to read this page - order of inspection</h2>
+  <div class="guide-step">
+    <span class="step-badge s1">1</span>
+    <div class="guide-text">
+      <b>Read Section 1 first</b> - the simplest of the three (statistics).
+      It gives you a baseline: "anything outside this band is unusual".
+    </div>
+  </div>
+  <div class="guide-step">
+    <span class="step-badge s2">2</span>
+    <div class="guide-text">
+      <b>Then Section 2 (Isolation Forest).</b> A smarter, AI-based model
+      that catches multi-dimensional weirdness the statistical test
+      cannot. Compare its anomalies to those of Section 1.
+    </div>
+  </div>
+  <div class="guide-step">
+    <span class="step-badge s3">3</span>
+    <div class="guide-text">
+      <b>Finally Section 3 (Logistic Regression).</b> A supervised model
+      trained on past data - gives a probability for every row. Use this
+      to prioritise: highest probabilities first.
+    </div>
+  </div>
+  <div class="guide-step">
+    <span class="step-badge s4">4</span>
+    <div class="guide-text">
+      <b>Look for agreement.</b> When two or three models flag the same
+      row, the evidence is strong. When only one flags it, treat it as a
+      candidate for manual check.
+    </div>
+  </div>
+</div>
+
+<div class="section-card">
+  <h2><span class="step-badge s1">1</span>Confidence-Interval method (the statistical baseline)</h2>
+  <div class="simple-words">
+    <span class="label">In plain words</span>
+    We compute the average ("mean") and the spread ("standard deviation") of
+    all the changes in Gross Sales between snapshots. We then draw an
+    invisible band around the average. Any row whose change falls
+    <b>outside</b> the band is called an anomaly. We use a level of
+    <b>{{ (ci_metrics.level * 100) | round(0) }}%</b> - the value the
+    reference study identified as the best trade-off between catching
+    anomalies and avoiding false alarms.
+  </div>
+  <div class="simple-words" style="border-color:var(--accent); background:#fff7ed;">
+    <span class="label" style="color:var(--accent)">How to read the chart</span>
+    Each dot is one row. <b>Grey dots</b> = normal. <b>Red dots</b> = anomaly.
+    The two purple dashed lines are the band. Hover any point to see the
+    item code and date. Drag a rectangle to zoom in.
+  </div>
+  <div class="row g-3">
+    <div class="col-md-4">
+      <div class="kpi-label">Confidence level</div>
+      <div class="kpi-value">{{ (ci_metrics.level * 100) | round(0) }}%</div>
+      <div class="mt-2">
+        <span class="metric-pill">Lower bound: {{ ci_metrics.lower_bound | round(0) }}</span>
+        <span class="metric-pill">Upper bound: {{ ci_metrics.upper_bound | round(0) }}</span>
+      </div>
+      <div class="mt-2">
+        <span class="metric-pill good">Recall {{ (ci_metrics.recall*100) | round(1) }}%
+          <small>(% of real anomalies caught)</small></span>
+        <span class="metric-pill good">Precision {{ (ci_metrics.precision*100) | round(1) }}%
+          <small>(of flagged, % truly anomalous)</small></span>
+        <span class="metric-pill">F1 {{ (ci_metrics.f1*100) | round(1) }}</span>
+      </div>
+      <h6 class="mt-3 small text-secondary">Confusion matrix
+        <small class="d-block fw-normal">how many got it right vs wrong</small></h6>
+      <div class="confusion-matrix">
+        <div></div><div><b>Pred 0</b></div><div><b>Pred 1</b></div>
+        <div><b>Actual 0</b></div><div class="tn">TN {{ ci_metrics.tn }}</div><div class="fp">FP {{ ci_metrics.fp }}</div>
+        <div><b>Actual 1</b></div><div class="fn">FN {{ ci_metrics.fn }}</div><div class="tp">TP {{ ci_metrics.tp }}</div>
+      </div>
+      <div class="small text-secondary mt-2">
+        TP = correctly flagged · TN = correctly ignored
+        · FP = false alarm · FN = missed
+      </div>
+    </div>
+    <div class="col-md-8">
+      <div id="plot-ci" class="plot-box"></div>
+    </div>
+  </div>
+</div>
+
+<div class="section-card">
+  <h2><span class="step-badge s2">2</span>Isolation Forest (the AI catcher)</h2>
+  <div class="simple-words">
+    <span class="label">In plain words</span>
+    Imagine playing "20 questions" to identify each row. Strange rows can
+    be isolated with very few questions - that's what makes them
+    "anomalies". The model looks at four things at once
+    (Gross Sales change, Gross Sales total, Sales-Out change, Sales-Out total)
+    so it catches weirdness no single number can. We tell it to flag the
+    most unusual <b>{{ (if_metrics.contamination * 100) | round(0) }}%</b>
+    of the inconsistent rows.
+  </div>
+  <div class="simple-words" style="border-color:var(--accent); background:#fff7ed;">
+    <span class="label" style="color:var(--accent)">How to read the chart</span>
+    Same kind of scatter plot as Section 1, but the red dots are now the
+    rows the AI thought were "easy to isolate" - multi-dimensional
+    outliers. Compare them with Section 1: Isolation Forest usually
+    catches a different, more extreme set.
+  </div>
+  <div class="row g-3">
+    <div class="col-md-4">
+      <span class="metric-pill good">Recall {{ (if_metrics.recall*100) | round(1) }}%</span>
+      <span class="metric-pill good">Precision {{ (if_metrics.precision*100) | round(1) }}%</span>
+      <span class="metric-pill">F1 {{ (if_metrics.f1*100) | round(1) }}</span>
+      <span class="metric-pill">Scored rows: {{ if_metrics.n_scored }}</span>
+      <h6 class="mt-3 small text-secondary">Confusion matrix</h6>
+      <div class="confusion-matrix">
+        <div></div><div><b>Pred 0</b></div><div><b>Pred 1</b></div>
+        <div><b>Actual 0</b></div><div class="tn">TN {{ if_metrics.tn }}</div><div class="fp">FP {{ if_metrics.fp }}</div>
+        <div><b>Actual 1</b></div><div class="fn">FN {{ if_metrics.fn }}</div><div class="tp">TP {{ if_metrics.tp }}</div>
+      </div>
+    </div>
+    <div class="col-md-8">
+      <div id="plot-if" class="plot-box"></div>
+    </div>
+  </div>
+</div>
+
+<div class="section-card">
+  <h2><span class="step-badge s3">3</span>Logistic Regression (the trained classifier)</h2>
+  <div class="simple-words">
+    <span class="label">In plain words</span>
+    Unlike the previous two models, this one is <b>trained</b> on past data:
+    we showed it many examples of "inconsistent" and "consistent" rows and
+    it learned the pattern. For every row it now outputs a probability
+    between 0% and 100% - your prioritisation score. It uses an
+    80/20 time-aware split, meaning the test set is strictly more recent
+    than the training set (no peeking at the future).
+  </div>
+  <div class="simple-words" style="border-color:var(--accent); background:#fff7ed;">
+    <span class="label" style="color:var(--accent)">How to read the chart</span>
+    Once again, grey = normal, red = flagged. Because this model uses a
+    probability threshold of 50%, it tends to flag <i>more</i> rows than
+    Isolation Forest. The "Most influential features" list on the left shows
+    which features mattered most: a positive coefficient means "the
+    bigger this feature, the more likely an anomaly".
+  </div>
+  <div class="row g-3">
+    <div class="col-md-4">
+      <span class="metric-pill good">Recall {{ (lr_metrics.recall*100) | round(1) }}%</span>
+      <span class="metric-pill good">Precision {{ (lr_metrics.precision*100) | round(1) }}%</span>
+      <span class="metric-pill">F1 {{ (lr_metrics.f1*100) | round(1) }}</span>
+      {% if lr_metrics.roc_auc %}
+        <span class="metric-pill good">ROC-AUC {{ (lr_metrics.roc_auc*100) | round(1) }}%
+          <small>(separating power)</small></span>
+      {% endif %}
+      <span class="metric-pill">Train n: {{ lr_metrics.n_train }}</span>
+      <span class="metric-pill">Test n: {{ lr_metrics.n_test }}</span>
+
+      <h6 class="mt-3 small text-secondary">Confusion matrix</h6>
+      <div class="confusion-matrix">
+        <div></div><div><b>Pred 0</b></div><div><b>Pred 1</b></div>
+        <div><b>Actual 0</b></div><div class="tn">TN {{ lr_metrics.tn }}</div><div class="fp">FP {{ lr_metrics.fp }}</div>
+        <div><b>Actual 1</b></div><div class="fn">FN {{ lr_metrics.fn }}</div><div class="tp">TP {{ lr_metrics.tp }}</div>
+      </div>
+
+      <h6 class="mt-3 mb-1 small text-secondary">Most influential features</h6>
+      <ul class="list-unstyled small mb-0">
+        {% for name, val in coef_top %}
+        <li><code>{{ name }}</code> →
+          <span class="metric-pill {% if val>0 %}bad{% else %}good{% endif %}">
+            {{ val | round(3) }}</span>
+        </li>{% endfor %}
+      </ul>
+
+    </div>
+    <div class="col-md-8">
+      <div id="plot-lr" class="plot-box"></div>
+    </div>
+  </div>
+
+  <div class="simple-words mt-3" style="font-size:0.82rem;">
+    <span class="label">Feature glossary</span>
+    <p class="mb-2">
+      Each feature was fed into the model <em>after standardisation</em>
+      (mean&nbsp;=&nbsp;0, std&nbsp;=&nbsp;1), so coefficients are
+      directly comparable: a larger absolute value means stronger
+      influence, regardless of the original unit.
+      A <span style="color:#b91c1c;font-weight:600;">positive coefficient</span>
+      means the row is <em>more</em> likely to be flagged as anomalous
+      when that feature is high.
+      A <span style="color:#15803d;font-weight:600;">negative coefficient</span>
+      means a high value is associated with a <em>normal</em> row.
+    </p>
+    <div class="table-responsive">
+      <table class="table table-sm table-borderless mb-0" style="font-size:0.8rem;">
+        <thead class="text-secondary">
+          <tr><th style="width:28%">Feature name</th><th>What it measures</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>DifferenceGrossSales_abs</code></td>
+            <td>Absolute size of the Gross Sales change between two consecutive snapshots.
+              Large values → a big revision occurred, regardless of direction.</td>
+          </tr>
+          <tr>
+            <td><code>DifferenceGrossSales_log</code></td>
+            <td>Sign-preserving log of the same change
+              (<code>sign(x)·log(1+|x|)</code>).
+              Keeps direction (up or down) while compressing extreme outliers
+              so they don't dominate the model.</td>
+          </tr>
+          <tr>
+            <td><code>DifferenceSalesOut_abs</code></td>
+            <td>Absolute size of the Sales-Out change between snapshots.
+              Flags rows where the sell-out figure was corrected by a large amount.</td>
+          </tr>
+          <tr>
+            <td><code>DifferenceSalesOut_log</code></td>
+            <td>Sign-preserving log of the Sales-Out change — same compression
+              logic as the Gross Sales equivalent above.</td>
+          </tr>
+          <tr>
+            <td><code>gross_to_so_ratio</code></td>
+            <td>Gross Sales ÷ Sales-Out quantity.
+              A ratio far from 1 signals that sell-in and sell-out are
+              unusually misaligned for this snapshot, which is a common
+              precursor to a data inconsistency.</td>
+          </tr>
+          <tr>
+            <td><code>DifferenceGrossSales</code></td>
+            <td>Raw (signed) Gross Sales difference — the uncompressed version.
+              Useful when the model needs to distinguish large positive from
+              large negative revisions.</td>
+          </tr>
+          <tr>
+            <td><code>DifferenceSalesOut</code></td>
+            <td>Raw (signed) Sales-Out difference — same logic as above
+              for the sell-out channel.</td>
+          </tr>
+          <tr>
+            <td><code>GrossSalesQuantitySwitched</code></td>
+            <td>Total Gross Sales volume in the most recent snapshot.
+              Very high or very low volumes can correlate with anomalies
+              because small-volume items are noisier and large-volume items
+              attract bigger absolute revisions.</td>
+          </tr>
+          <tr>
+            <td><code>SalesOutQuantitySwitched</code></td>
+            <td>Total Sales-Out volume in the most recent snapshot.
+              Acts as a size normaliser: anomalies on high-volume items
+              have a different profile than those on low-volume items.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="section-card" style="border-left: 4px solid var(--primary);">
+  <h2><span class="step-badge s4">4</span>How to combine the three opinions</h2>
+  <div class="simple-words">
+    <span class="label">Decision rule</span>
+    <ul class="mb-0 mt-1">
+      <li><b>All three flag the row</b> → strong signal. Definitely review.</li>
+      <li><b>Two flag it</b> → likely anomaly. Worth a quick look.</li>
+      <li><b>Only one flags it</b> → could be a false alarm. Use the per-item
+        page to investigate before acting.</li>
+      <li><b>None flag it</b> → safe to validate.</li>
+    </ul>
+  </div>
+  <p class="small text-secondary mt-2 mb-0">
+    The <a href="/rankings">Suspicious Items</a> ranking already does this
+    blending for you and gives one composite score per item.
+  </p>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadModel(model, divId) {
+  const data = await CRP.fetchJSON('/api/anomaly_scatter?model=' + model);
+  const tracesNorm = {
+    x: data.normal.x, y: data.normal.y,
+    text: data.normal.item.map((it, i) => `${it} · ${data.normal.date[i]}`),
+    type: 'scattergl', mode: 'markers',
+    name: 'Normal', marker: {color: '#94a3b8', size: 5, opacity: 0.55},
+    hovertemplate: '%{text}<br>Diff %{x:,.0f}<br>Gross %{y:,.0f}<extra></extra>',
+  };
+  const tracesAnom = {
+    x: data.anomaly.x, y: data.anomaly.y,
+    text: data.anomaly.item.map((it, i) => `${it} · ${data.anomaly.date[i]}`),
+    type: 'scattergl', mode: 'markers',
+    name: 'Anomaly', marker: {color: '#b91c1c', size: 7, opacity: 0.85, line: {width: 0.5, color: '#7f1d1d'}},
+    hovertemplate: '%{text}<br>Diff %{x:,.0f}<br>Gross %{y:,.0f}<extra></extra>',
+  };
+  const traces = [tracesNorm, tracesAnom];
+  const layout = {
+    xaxis: {title: 'Difference Gross Sales (current minus previous snapshot)'},
+    yaxis: {title: 'Gross Sales Quantity Switched'},
+  };
+  if (model === 'ci') {
+    // Clip x-axis to 1st–99th percentile of the scatter data so the CI
+    // bounds (which are much smaller than extreme outliers) are visible.
+    const allX = [...data.normal.x, ...data.anomaly.x].filter(v => v !== null && isFinite(v));
+    allX.sort((a, b) => a - b);
+    const p1  = allX[Math.floor(allX.length * 0.01)] ?? allX[0];
+    const p99 = allX[Math.floor(allX.length * 0.99)] ?? allX[allX.length - 1];
+    // Expand range so the CI bound lines sit inside with a small margin.
+    const xMin = Math.min(p1,  data.ci_bounds[0] * 1.15);
+    const xMax = Math.max(p99, data.ci_bounds[1] * 1.15);
+    layout.xaxis.range = [xMin, xMax];
+
+    // Draw CI bounds as vertical line traces (full y-range, paper coords).
+    // Using scatter traces instead of shapes is more reliable in Plotly.js.
+    const allY = [...data.normal.y, ...data.anomaly.y].filter(v => v !== null && isFinite(v));
+    const yMin = Math.min(...allY), yMax = Math.max(...allY);
+    traces.push({
+      x: [data.ci_bounds[0], data.ci_bounds[0]], y: [yMin, yMax],
+      mode: 'lines', name: 'Lower bound (CI)',
+      line: {color: '#7c3aed', dash: 'dash', width: 2},
+      hovertemplate: 'Lower CI bound: %{x:,.0f}<extra></extra>',
+    });
+    traces.push({
+      x: [data.ci_bounds[1], data.ci_bounds[1]], y: [yMin, yMax],
+      mode: 'lines', name: 'Upper bound (CI)',
+      line: {color: '#7c3aed', dash: 'dash', width: 2},
+      hovertemplate: 'Upper CI bound: %{x:,.0f}<extra></extra>',
+    });
+  }
+  CRP.plot(divId, traces, layout);
+}
+
+loadModel('ci', 'plot-ci');
+loadModel('if', 'plot-if');
+loadModel('lr', 'plot-lr');
+</script>
+{% endblock %}

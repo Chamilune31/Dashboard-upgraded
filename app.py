@@ -170,6 +170,8 @@ def api_overview():
     by_month["if_pct"] = (100 * by_month["iso"] / by_month["rows"]).round(2)
     by_month["lr_pct"] = (100 * by_month["lr"] / by_month["rows"]).round(2)
 
+    # Distribution of revisions (non-null)
+    rev = sub["ForecastRevisions"].dropna()
     # Distribution of revisions — signed-log transform so the full dynamic
     # range is visible (zeros are excluded from binning, counted separately).
     rev_all = sub["ForecastRevisions"].dropna()
@@ -409,13 +411,9 @@ def api_item(code):
 
     # Snapshots (multiple) — used for overlap chart
     snaps_payload = []
-    snaps_gross_payload = []
-    snaps_so_payload = []
     for s in sorted(sel["SnapshotMonth"].unique().tolist()):
-        snap_sel = sel[sel["SnapshotMonth"] == s]
-
-        # Forecast overlay
-        ss = (snap_sel.dropna(subset=["ForecastSalesInQuantity"])
+        ss = (sel[sel["SnapshotMonth"] == s]
+              .dropna(subset=["ForecastSalesInQuantity"])
               .groupby("ForecastMonth")
               .agg(qty=("ForecastSalesInQuantity", "mean")).reset_index())
         ss["dt"] = pd.to_datetime(ss["ForecastMonth"].astype(str), format="%Y%m", errors="coerce")
@@ -424,26 +422,6 @@ def api_item(code):
             "snapshot": s,
             "x": ss["dt"].dt.strftime("%Y-%m-%d").tolist(),
             "y": ss["qty"].astype(float).tolist(),
-        })
-
-        # Actual GrossSalesQuantitySwitched overlay
-        sg = (snap_sel.groupby("SalesDate")
-              .agg(qty=("GrossSalesQuantitySwitched", "sum")).reset_index()
-              .sort_values("SalesDate"))
-        snaps_gross_payload.append({
-            "snapshot": s,
-            "x": sg["SalesDate"].dt.strftime("%Y-%m-%d").tolist(),
-            "y": sg["qty"].astype(float).tolist(),
-        })
-
-        # Actual SalesOutQuantitySwitched overlay
-        so = (snap_sel.groupby("SalesDate")
-              .agg(qty=("SalesOutQuantitySwitched", "sum")).reset_index()
-              .sort_values("SalesDate"))
-        snaps_so_payload.append({
-            "snapshot": s,
-            "x": so["SalesDate"].dt.strftime("%Y-%m-%d").tolist(),
-            "y": so["qty"].astype(float).tolist(),
         })
 
     return jsonify(_to_jsonable({
@@ -455,18 +433,12 @@ def api_item(code):
         "ci_flag": sub["ci"].astype(int).tolist(),
         "if_flag": sub["ifl"].astype(int).tolist(),
         "lr_flag": sub["lr"].astype(int).tolist(),
-        "ci_lower": float(PIPE["ci_metrics"]["lower_bound"]),
-        "ci_upper": float(PIPE["ci_metrics"]["upper_bound"]),
-        "ci_mean":  float(PIPE["ci_metrics"]["mean"]),
-        "ci_level": float(PIPE["ci_metrics"]["level"]),
         "fc_x": fc["dt"].dt.strftime("%Y-%m-%d").tolist(),
         "fc_y": fc["forecast"].astype(float).tolist(),
         "fc_upper": fc["upper"].astype(float).tolist(),
         "fc_lower": fc["lower"].astype(float).tolist(),
         "fc_revisions": fc["revisions"].astype(float).tolist(),
         "snapshots": snaps_payload,
-        "snapshots_gross": snaps_gross_payload,
-        "snapshots_so": snaps_so_payload,
         "ranking": rk_row,
         "rows": len(sel),
     }))
